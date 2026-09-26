@@ -1,0 +1,48 @@
+# Plan de OWASP ZAP (Automation Framework) para escanear el módulo completo.
+# Uso local:
+#   ZAP_AUTH_HEADER_VALUE="Bearer <token de Administrador>" \
+#   TARGET=http://localhost:3000 OPENAPI_FILE=$PWD/docs/openapi.yaml \
+#   REPORT_DIR=$PWD/reports REPORT_NAME=zap-reporte \
+#   zap.sh -cmd -autorun $PWD/.zap/automation.yaml
+env:
+  contexts:
+    - name: modulo-inventario
+      urls:
+        - ${TARGET}
+      includePaths:
+        - ${TARGET}.*
+  parameters:
+    failOnError: true
+    failOnWarning: false
+    progressToStdout: true
+jobs:
+  - type: openapi            # importa todos los endpoints desde la especificación
+    parameters:
+      apiFile: ${OPENAPI_FILE}
+      targetUrl: ${TARGET}
+  - type: spider             # recorre la página web
+    parameters:
+      context: modulo-inventario
+      maxDuration: 1
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 2
+  - type: activeScan         # ataques simulados: inyección SQL, XSS, path traversal, etc.
+    parameters:
+      context: modulo-inventario
+      maxRuleDurationInMins: 1
+      maxScanDurationInMins: 12
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 2
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: ${REPORT_DIR}
+      reportFile: ${REPORT_NAME}.html
+      reportTitle: OWASP ZAP - Modulo de Inventario
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: ${REPORT_DIR}
+      reportFile: ${REPORT_NAME}.json

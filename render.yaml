@@ -1,0 +1,22 @@
+# Blueprint de Render (New → Blueprint → seleccionar este repositorio)
+services:
+  - type: web
+    name: modulo-inventario
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    # El pipeline de GitHub Actions decide cuándo desplegar (después de pruebas y build)
+    autoDeployTrigger: "off"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: JWT_SECRET
+        generateValue: true # Render genera un secreto aleatorio
+      - key: TRUST_PROXY
+        value: "true"
+      - key: DB_PATH
+        value: data/inventario.db

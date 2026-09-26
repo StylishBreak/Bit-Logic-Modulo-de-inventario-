@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inventario de comedores · Plataforma de donaciones</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="barra">
+      <div>
+        <h1>Inventario de comedores</h1>
+        <p class="subtitulo">Plataforma de donaciones · Equipo 6 · Módulo de Inventario</p>
+      </div>
+      <div id="sesion-actual" class="sesion oculto">
+        <span id="sesion-nombre" class="sesion-nombre"></span>
+        <span id="sesion-rol" class="insignia"></span>
+        <button id="btn-salir" type="button" class="boton secundario">Cerrar sesión</button>
+      </div>
+    </header>
+
+    <main class="contenedor">
+      <section class="principal">
+        <!-- Inicio de sesión -->
+        <section id="vista-login" class="tarjeta login">
+          <h2>Iniciar sesión</h2>
+          <form id="form-login" novalidate>
+            <label>Correo
+              <input id="login-correo" type="email" autocomplete="username" placeholder="usuario@comedores.test" />
+            </label>
+            <label>Contraseña
+              <input id="login-password" type="password" autocomplete="current-password" />
+            </label>
+            <button type="submit" class="boton">Entrar</button>
+          </form>
+          <div class="usuarios-prueba">
+            <p>Usuarios de prueba (la contraseña está en el README):</p>
+            <button type="button" class="chip" data-correo="admin@comedores.test">Administrador</button>
+            <button type="button" class="chip" data-correo="responsable.a@comedores.test">Usuario · Comedor A</button>
+            <button type="button" class="chip" data-correo="responsable.b@comedores.test">Usuario · Comedor B</button>
+          </div>
+          <button id="btn-sin-token" type="button" class="boton secundario">Probar la API sin token</button>
+        </section>
+
+        <!-- Inventario -->
+        <section id="vista-inventario" class="oculto">
+          <div class="tarjeta barra-herramientas">
+            <label class="en-linea">Comedor
+              <select id="sel-comedor"></select>
+            </label>
+            <button id="btn-actualizar" type="button" class="boton secundario">Actualizar</button>
+            <button id="btn-general" type="button" class="boton secundario">Inventario general <span class="candado">Solo Administrador</span></button>
+          </div>
+
+          <section id="seccion-general" class="tarjeta oculto">
+            <h3>Inventario general de todos los comedores</h3>
+            <div class="tabla-envoltura">
+              <table id="tabla-general">
+                <thead>
+                  <tr><th>Comedor</th><th>Productos</th><th>Por caducar</th><th>Seco</th><th>Refrigerado</th><th>Congelado</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="tarjeta">
+            <h2 id="titulo-comedor">Inventario</h2>
+            <div id="semaforos" class="semaforos"></div>
+            <ul id="alertas" class="alertas"></ul>
+            <div class="tabla-envoltura">
+              <table id="tabla-productos">
+                <thead>
+                  <tr>
+                    <th>ID</th><th>Producto</th><th>Categoría</th><th>Almacén</th>
+                    <th>Stock / máximo</th><th>Lote</th><th>Caducidad</th><th id="col-acciones">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <div class="rejilla">
+            <section class="tarjeta">
+              <h3>Registrar movimiento</h3>
+              <form id="form-movimiento" novalidate>
+                <label>Tipo
+                  <select id="mov-tipo">
+                    <option value="entradas">Entrada (recepción)</option>
+                    <option value="salidas">Salida (consumo)</option>
+                    <option value="mermas">Merma (pérdida)</option>
+                  </select>
+                </label>
+                <label>Producto <select id="mov-producto"></select></label>
+                <label>Cantidad <input id="mov-cantidad" type="number" min="1" max="10000" step="0.01" /></label>
+                <label>Motivo <input id="mov-motivo" type="text" maxlength="200" placeholder="Obligatorio en mermas y excepciones" /></label>
+                <label class="casilla"><input id="mov-excepcion" type="checkbox" /> Autorizar excepción al límite <span class="candado">Solo Administrador</span></label>
+                <button type="submit" class="boton">Registrar</button>
+              </form>
+            </section>
+
+            <section class="tarjeta">
+              <h3>Crear producto <span class="candado">Solo Administrador</span></h3>
+              <form id="form-producto" novalidate>
+                <label>Nombre <input id="prod-nombre" type="text" maxlength="60" /></label>
+                <label>Categoría <input id="prod-categoria" type="text" maxlength="40" /></label>
+                <div class="dos-columnas">
+                  <label>Almacenamiento
+                    <select id="prod-almacenamiento">
+                      <option value="seco">Seco</option>
+                      <option value="refrigerado">Refrigerado</option>
+                      <option value="congelado">Congelado</option>
+                    </select>
+                  </label>
+                  <label>Unidad
+                    <select id="prod-unidad">
+                      <option value="kg">kg</option>
+                      <option value="l">litros</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="dos-columnas">
+                  <label>Consumo diario <input id="prod-consumo" type="number" min="0.01" step="0.01" /></label>
+                  <label>Días de cobertura <input id="prod-dias" type="number" min="1" max="365" step="1" /></label>
+                </div>
+                <div class="dos-columnas">
+                  <label>Lote <input id="prod-lote" type="text" maxlength="30" /></label>
+                  <label>Caducidad <input id="prod-caducidad" type="date" /></label>
+                </div>
+                <button type="submit" class="boton">Crear producto</button>
+              </form>
+            </section>
+
+            <section class="tarjeta">
+              <h3>Configurar capacidad <span class="candado">Solo Administrador</span></h3>
+              <form id="form-capacidad" novalidate>
+                <label>Seco (kg) <input id="cap-seco" type="number" min="0" step="0.01" /></label>
+                <label>Refrigerado (kg o l) <input id="cap-refrigerado" type="number" min="0" step="0.01" /></label>
+                <label>Congelado (kg) <input id="cap-congelado" type="number" min="0" step="0.01" /></label>
+                <button type="submit" class="boton">Guardar capacidad</button>
+              </form>
+            </section>
+          </div>
+
+          <section class="tarjeta">
+            <h3>Historial de movimientos (últimos 20)</h3>
+            <div class="tabla-envoltura">
+              <table id="tabla-movimientos">
+                <thead>
+                  <tr><th>ID</th><th>Fecha</th><th>Tipo</th><th>Producto</th><th>Cantidad</th><th>Rechazada</th><th>Motivo</th><th>Registró</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+        </section>
+      </section>
+
+      <aside class="lateral">
+        <section id="panel-respuesta" class="tarjeta respuesta">
+          <h3>Última respuesta del servidor</h3>
+          <p id="resp-peticion" class="peticion">Aún no hay peticiones.</p>
+          <p><span id="resp-estado" class="estado"></span></p>
+          <pre id="resp-cuerpo" class="json"></pre>
+        </section>
+
+        <details id="panel-jwt" class="tarjeta oculto" open>
+          <summary>Token JWT de la sesión</summary>
+          <p class="nota">Se guarda solo en memoria y viaja en <code>Authorization: Bearer</code>.</p>
+          <pre id="jwt-token" class="token"></pre>
+          <h4>Encabezado</h4>
+          <pre id="jwt-encabezado" class="json"></pre>
+          <h4>Contenido (payload)</h4>
+          <pre id="jwt-carga" class="json"></pre>
+          <dl id="jwt-fechas" class="fechas"></dl>
+        </details>
+      </aside>
+    </main>
+  </body>
+</html>

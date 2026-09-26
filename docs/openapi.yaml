@@ -1,0 +1,211 @@
+openapi: 3.0.3
+info:
+  title: Módulo de Inventario · Plataforma de donaciones
+  version: 1.0.0
+  description: >
+    API REST del Equipo 6. Autenticación con JWT (HS256, 1 hora) y roles Usuario y Administrador.
+    Un Usuario solo opera el comedor que tiene asignado; el Administrador opera todos.
+servers:
+  - url: http://localhost:3000
+tags:
+  - name: Sesión
+  - name: Inventario
+  - name: Administración
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    comedorId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1, example: 1 }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string, example: No tienes permiso para realizar esta acción }
+        detalles: { type: array, items: { type: string } }
+    Credenciales:
+      type: object
+      required: [correo, password]
+      properties:
+        correo: { type: string, format: email, example: responsable.a@comedores.test }
+        password: { type: string, example: ComedorA#2026 }
+    Movimiento:
+      type: object
+      required: [productoId, cantidad]
+      properties:
+        productoId: { type: integer, minimum: 1, example: 1 }
+        cantidad: { type: number, minimum: 1, maximum: 10000, example: 5 }
+        motivo: { type: string, minLength: 5, maxLength: 200, example: Consumo del día }
+    Entrada:
+      allOf:
+        - $ref: '#/components/schemas/Movimiento'
+        - type: object
+          properties:
+            excepcion: { type: boolean, example: false, description: Solo Administrador }
+    Producto:
+      type: object
+      required: [nombre, categoria, almacenamiento, unidad, consumoDiario, diasCobertura, lote, caducidad]
+      properties:
+        nombre: { type: string, example: Pasta }
+        categoria: { type: string, example: Granos }
+        almacenamiento: { type: string, enum: [seco, refrigerado, congelado], example: seco }
+        unidad: { type: string, enum: [kg, l], example: kg }
+        consumoDiario: { type: number, example: 20 }
+        diasCobertura: { type: integer, example: 30 }
+        lote: { type: string, example: P-10 }
+        caducidad: { type: string, format: date, example: '2027-05-01' }
+    Capacidad:
+      type: object
+      properties:
+        seco: { type: number, example: 1000 }
+        refrigerado: { type: number, example: 400 }
+        congelado: { type: number, example: 200 }
+  responses:
+    NoAutenticado:
+      description: Sin token, token inválido o expirado
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Prohibido:
+      description: El rol no tiene permiso o el comedor no es del usuario
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    DatosInvalidos:
+      description: Datos inválidos
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      tags: [Sesión]
+      summary: Estado del servicio y versión desplegada
+      security: []
+      responses:
+        '200': { description: Servicio disponible }
+  /api/auth/login:
+    post:
+      tags: [Sesión]
+      summary: Iniciar sesión y obtener el JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credenciales' }
+      responses:
+        '200': { description: Token generado }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { description: Usuario bloqueado }
+        '429': { description: Demasiados intentos }
+  /api/inventario:
+    get:
+      tags: [Administración]
+      summary: Inventario general de todos los comedores (solo Administrador)
+      responses:
+        '200': { description: Resumen por comedor con semáforo }
+        '401': { $ref: '#/components/responses/NoAutenticado' }
+        '403': { $ref: '#/components/responses/Prohibido' }
+  /api/comedores/{id}/inventario:
+    get:
+      tags: [Inventario]
+      summary: Inventario de un comedor
+      parameters: [{ $ref: '#/components/parameters/comedorId' }]
+      responses:
+        '200': { description: Productos, ocupación y alertas }
+        '403': { $ref: '#/components/responses/Prohibido' }
+        '404': { description: Comedor no encontrado }
+  /api/comedores/{id}/movimientos:
+    get:
+      tags: [Inventario]
+      summary: Últimos 20 movimientos del comedor
+      parameters: [{ $ref: '#/components/parameters/comedorId' }]
+      responses:
+        '200': { description: Historial }
+  /api/comedores/{id}/entradas:
+    post:
+      tags: [Inventario]
+      summary: Registrar una entrada con límite de recepción
+      parameters: [{ $ref: '#/components/parameters/comedorId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Entrada' }
+      responses:
+        '201': { description: Entrada registrada (total o parcial) }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '403': { $ref: '#/components/responses/Prohibido' }
+        '409': { description: Sin espacio o stock máximo alcanzado }
+  /api/comedores/{id}/salidas:
+    post:
+      tags: [Inventario]
+      summary: Registrar una salida
+      parameters: [{ $ref: '#/components/parameters/comedorId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Movimiento' }
+      responses:
+        '201': { description: Salida registrada }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+  /api/comedores/{id}/mermas:
+    post:
+      tags: [Inventario]
+      summary: Registrar una merma (motivo obligatorio)
+      parameters: [{ $ref: '#/components/parameters/comedorId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Movimiento' }
+      responses:
+        '201': { description: Merma registrada }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+  /api/comedores/{id}/productos:
+    post:
+      tags: [Administración]
+      summary: Crear producto (solo Administrador)
+      parameters: [{ $ref: '#/components/parameters/comedorId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Producto' }
+      responses:
+        '201': { description: Producto creado }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '403': { $ref: '#/components/responses/Prohibido' }
+        '409': { description: Producto duplicado }
+  /api/comedores/{id}/productos/{productoId}:
+    delete:
+      tags: [Administración]
+      summary: Eliminar producto sin existencias (solo Administrador)
+      parameters:
+        - { $ref: '#/components/parameters/comedorId' }
+        - name: productoId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1, example: 999 }
+      responses:
+        '200': { description: Producto eliminado }
+        '404': { description: Producto no encontrado }
+        '409': { description: El producto aún tiene existencias }
+  /api/comedores/{id}/capacidad:
+    put:
+      tags: [Administración]
+      summary: Configurar capacidad de almacenamiento (solo Administrador)
+      parameters: [{ $ref: '#/components/parameters/comedorId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Capacidad' }
+      responses:
+        '200': { description: Capacidad actualizada }
+        '409': { description: Capacidad menor a lo ocupado }

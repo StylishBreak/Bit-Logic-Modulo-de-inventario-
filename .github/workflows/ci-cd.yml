@@ -1,6 +1,7 @@
 name: CI/CD Módulo de Inventario
 
 # 1) CÓDIGO: el pipeline se activa solo con cada push o pull request a main
+#    (y se puede lanzar a mano desde la pestaña Actions)
 on:
   push:
     branches: [main]
@@ -8,96 +9,151 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  # 2) PRUEBAS: instala dependencias y ejecuta las pruebas unitarias con cobertura
+  # 2) PRUEBAS: pruebas unitarias y de API con cobertura + análisis de calidad (SonarQube Cloud)
   pruebas:
-    runs-on: ubuntu-22.04
+    name: Pruebas y calidad
+    runs-on: ubuntu-latest
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Descargar el código
+        uses: actions/checkout@v6
         with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
+          fetch-depth: 0 # historial completo para SonarQube
+
+      - name: Preparar Node.js 22
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
-          cache: npm
-      - name: Instalar dependencias
-        run: npm ci --no-audit --no-fund
-      - name: Auditoría de dependencias
-        run: npm audit --omit=dev --audit-level=high || true
-      - name: Ejecutar pruebas con cobertura
-        run: npm test -- --ci --runInBand
-        env:
-          NODE_ENV: test
-      - name: Guardar reporte de cobertura y resultados
-        if: ${{ always() && hashFiles('coverage/**') != '' }}
-        uses: actions/upload-artifact@v4
+          node-version: 22
+
+      - name: Instalar (el proyecto no tiene dependencias externas)
+        run: npm ci
+
+      - name: Auditar dependencias
+        run: npm audit --audit-level=high
+
+      - name: Ejecutar pruebas con cobertura (falla si la cobertura baja del mínimo)
+        run: npm test
+
+      - name: Guardar resultados de pruebas y cobertura
+        if: always()
+        uses: actions/upload-artifact@v6
         with:
-          name: cobertura-y-pruebas
+          name: pruebas-y-cobertura
           path: |
-            coverage/**
+            coverage/lcov.info
             reports/junit.xml
-      - name: Análisis de calidad con SonarQube / SonarCloud
-        if: ${{ env.SONAR_TOKEN != '' }}
-        uses: SonarSource/sonarqube-scan-action@v5
-        env:
-          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL || 'https://sonarcloud.io' }}
 
-  # 3) BUILD: verifica y empaqueta el proyecto y construye la imagen Docker
+      - name: Análisis de calidad con SonarQube Cloud
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@v8
+        with:
+          args: >
+            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+
+  # 3) BUILD: revisa sintaxis y SQL, genera dist/ y prueba que el paquete arranque
   build:
+    name: Build
     needs: pruebas
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - name: Instalar dependencias
-        run: npm ci --no-audit --no-fund
-      - run: npm run build
-      - run: docker build -t modulo-inventario:${{ github.sha }} .
-      - name: Prueba rápida de la imagen
-        run: |
-          docker run -d -p 3000:3000 -e JWT_SECRET=ci-secret --name app modulo-inventario:${{ github.sha }}
-          sleep 5
-          curl --fail http://localhost:3000/health
-      - name: Guardar artefacto del build
-        if: ${{ always() && hashFiles('dist/**') != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/**
+      - uses: actions/checkout@v6
 
-  # 4) DESPLIEGUE: solo en push a main, dispara el despliegue en Render y verifica que responda
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      - name: Construir el paquete
+        run: npm run build
+
+      - name: Prueba de humo del paquete construido
+        working-directory: dist
+        run: |
+          export JWT_SECRET="$(openssl rand -hex 32)"
+          export DB_PATH="$RUNNER_TEMP/inventario.db"
+          node --disable-warning=ExperimentalWarning src/server.js &
+          sleep 2
+          curl --fail --silent http://localhost:3000/health
+          echo
+          curl --fail --silent --output /dev/null http://localhost:3000/
+          codigo=$(curl --silent --output /dev/null --write-out "%{http_code}" http://localhost:3000/api/inventario)
+          test "$codigo" = "401" && echo "✔ La API rechaza peticiones sin token (401)"
+
+      - name: Guardar el paquete construido
+        uses: actions/upload-artifact@v6
+        with:
+          name: modulo-inventario-dist
+          path: dist/
+
+  # 4) DESPLIEGUE: solo en push a main; publica en Render el commit que pasó pruebas y build
   despliegue:
+    name: Despliegue en Render
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-22.04
-    environment: produccion
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: produccion
+      url: ${{ vars.APP_URL }}
+    env:
+      RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+      APP_URL: ${{ vars.APP_URL }}
+    outputs:
+      configurado: ${{ steps.configuracion.outputs.configurado }}
     steps:
-      - name: Disparar despliegue en Render
-        run: curl --fail -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
-      - name: Esperar y verificar que el servicio esté arriba
+      - name: Revisar configuración de Render
+        id: configuracion
         run: |
-          for i in $(seq 1 30); do
-            if curl --silent --fail "${{ vars.APP_URL }}/health"; then echo " Despliegue verificado"; exit 0; fi
-            sleep 10
-          done
-          echo "El servicio no respondió a tiempo"; exit 1
+          if [ -z "$RENDER_DEPLOY_HOOK" ] || [ -z "$APP_URL" ]; then
+            echo "configurado=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Se omite Render: configura RENDER_DEPLOY_HOOK y APP_URL para habilitar despliegue y ZAP."
+          else
+            echo "configurado=true" >> "$GITHUB_OUTPUT"
+          fi
 
-  # Seguridad: escaneo OWASP ZAP contra la versión desplegada
-  zap:
+      - name: Disparar el despliegue del commit probado
+        if: steps.configuracion.outputs.configurado == 'true'
+        run: curl --fail --silent --show-error -X POST "${RENDER_DEPLOY_HOOK}&ref=${GITHUB_SHA}"
+
+      - name: Verificar que la nueva versión responde
+        if: steps.configuracion.outputs.configurado == 'true'
+        run: |
+          for intento in $(seq 1 40); do
+            version=$(curl --silent --max-time 20 "$APP_URL/health" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
+            if [ ${#version} -ge 7 ] && [ "${GITHUB_SHA#"$version"}" != "$GITHUB_SHA" ]; then
+              echo "✔ Versión $version desplegada y respondiendo en $APP_URL"
+              exit 0
+            fi
+            echo "Intento $intento: versión publicada '${version:-sin respuesta}', esperando..."
+            sleep 15
+          done
+          echo "::error::La nueva versión no respondió a tiempo"
+          exit 1
+
+  # 5) SEGURIDAD: escaneo base de OWASP ZAP sobre la versión publicada
+  seguridad:
+    name: Seguridad (OWASP ZAP)
     needs: despliegue
-    runs-on: ubuntu-22.04
-    permissions:
-      issues: write
+    if: needs.despliegue.outputs.configurado == 'true'
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: zaproxy/action-baseline@v0.14.0
+      - uses: actions/checkout@v6
+
+      - name: Escaneo base de OWASP ZAP
+        uses: zaproxy/action-baseline@v0.15.0
         with:
           target: ${{ vars.APP_URL }}
           rules_file_name: .zap/rules.tsv
           allow_issue_writing: false
           fail_action: false
+          artifact_name: reporte-zap

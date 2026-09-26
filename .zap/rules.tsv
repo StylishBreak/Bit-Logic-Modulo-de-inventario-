@@ -1,1 +1,6 @@
-10049	IGNORE	(Contenido no almacenable en caché: la API envía Cache-Control no-store a propósito)
+10109	IGNORE	(Modern Web Application: solo informa que la página usa JavaScript)
+10104	IGNORE	(User Agent Fuzzer: informativa)
+10038	FAIL	(Content Security Policy no configurada: se corrigió, no debe volver a aparecer)
+10020	FAIL	(Falta encabezado anti-clickjacking: se corrigió, no debe volver a aparecer)
+10021	FAIL	(Falta X-Content-Type-Options: se corrigió, no debe volver a aparecer)
+10024	FAIL	(Información sensible en la URL: se corrigió en el formulario de inicio de sesión)

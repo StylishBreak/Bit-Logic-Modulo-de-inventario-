@@ -1,5 +1,9 @@
 node_modules/
 coverage/
-reports/
 dist/
+data/
+reports/
+*.db
+*.db-journal
 .env
+.DS_Store

@@ -1,23 +1,48 @@
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const store = require('../data/store');
-const config = require('../config');
-const { requeridos, EMAIL_RE } = require('../utils/validators');
-const { badRequest, unauthorized, forbidden } = require('../utils/errors');
+'use strict';
 
-async function login(body = {}) {
-  requeridos(body, ['correo', 'contrasena']);
-  if (!EMAIL_RE.test(body.correo)) throw badRequest('El correo tiene un formato inválido');
-  const usuario = store.db.usuarios.find((u) => u.correo === String(body.correo).toLowerCase());
-  const ok = usuario && (await bcrypt.compare(String(body.contrasena), usuario.hash));
-  if (!ok) throw unauthorized('Credenciales incorrectas');
-  if (usuario.estado !== 'activo') throw forbidden('Usuario bloqueado o pendiente de validación');
-  const token = jwt.sign(
-    { sub: usuario.id, rol: usuario.rol, comedorId: usuario.comedorId },
-    config.jwtSecret,
-    { expiresIn: config.jwtExpiresIn, algorithm: 'HS256' },
-  );
-  return { token, usuario: { id: usuario.id, nombre: usuario.nombre, rol: usuario.rol, comedorId: usuario.comedorId } };
+const crypto = require('node:crypto');
+const { generarHash, verificarPassword } = require('../utils/password');
+const { firmarToken } = require('../utils/jwt');
+const { validarCredenciales } = require('../utils/validators');
+const { errores } = require('../utils/errores');
+
+function crearServicioAuth({ db, config }) {
+  const buscarPorCorreo = db.prepare(`
+    SELECT id, nombre, password_hash AS passwordHash, rol, comedor_id AS comedorId, activo
+    FROM usuarios
+    WHERE correo = ?`);
+
+  // Si el correo no existe se verifica contra un hash de relleno para que la respuesta
+  // tarde lo mismo y no revele qué correos están registrados.
+  let hashDeRelleno;
+  async function obtenerHashDeRelleno() {
+    hashDeRelleno ??= await generarHash(crypto.randomUUID());
+    return hashDeRelleno;
+  }
+
+  async function iniciarSesion(datos) {
+    const { correo, password } = validarCredenciales(datos);
+    const usuario = buscarPorCorreo.get(correo);
+    const hash = usuario ? usuario.passwordHash : await obtenerHashDeRelleno();
+    const coincide = await verificarPassword(password, hash);
+
+    if (!usuario || !coincide) throw errores.noAutenticado('Credenciales incorrectas');
+    if (usuario.activo !== 1) throw errores.prohibido('Usuario bloqueado. Contacta al Administrador');
+
+    const token = firmarToken(
+      { sub: usuario.id, rol: usuario.rol, comedorId: usuario.comedorId },
+      config.jwtSecreto,
+      config.jwtExpiraSegundos
+    );
+    return {
+      token,
+      tipo: 'Bearer',
+      expiraEn: config.jwtExpiraSegundos,
+      usuario: { id: usuario.id, nombre: usuario.nombre, rol: usuario.rol, comedorId: usuario.comedorId },
+    };
+  }
+
+  return { iniciarSesion };
 }
 
-module.exports = { login };
+module.exports = { crearServicioAuth };

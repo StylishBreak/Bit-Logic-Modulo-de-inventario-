@@ -1,25 +1,56 @@
-const router = require('express').Router();
-const { autenticar, autorizar } = require('../middleware/auth');
-const svc = require('../services/inventario.service');
+'use strict';
 
-const ADMIN = 'Administrador';
-const AMBOS = ['Usuario', ADMIN];
-const h = (fn, status = 200) => (req, res, next) => {
-  try { res.status(status).json(fn(req)); } catch (e) { next(e); }
-};
+const { verificarAccesoComedor } = require('../middleware/auth');
+const { validarId } = require('../utils/validators');
 
-router.use(autenticar);
+const AMBOS_ROLES = ['Usuario', 'Administrador'];
+const SOLO_ADMINISTRADOR = ['Administrador'];
 
-// Usuario y Administrador
-router.get('/comedores/:id/inventario', autorizar(...AMBOS), h((req) => svc.consultarInventario(req.usuario, req.params.id)));
-router.post('/comedores/:id/entradas', autorizar(...AMBOS), h((req) => svc.registrarEntrada(req.usuario, req.params.id, req.body), 201));
-router.post('/comedores/:id/salidas', autorizar(...AMBOS), h((req) => svc.registrarSalida(req.usuario, req.params.id, req.body, 'salida'), 201));
-router.post('/comedores/:id/mermas', autorizar(...AMBOS), h((req) => svc.registrarSalida(req.usuario, req.params.id, req.body, 'merma'), 201));
+/** Valida el :id de la URL y comprueba que el usuario pueda trabajar con ese comedor. */
+function comedorDeLaRuta(ctx) {
+  const comedorId = validarId(ctx.params.id, 'id del comedor');
+  verificarAccesoComedor(ctx.usuario, comedorId);
+  return comedorId;
+}
 
-// Solo Administrador
-router.get('/inventario', autorizar(ADMIN), h(() => svc.consultarTodos()));
-router.post('/comedores/:id/productos', autorizar(ADMIN), h((req) => svc.crearProducto(req.params.id, req.body), 201));
-router.delete('/comedores/:id/productos/:productoId', autorizar(ADMIN), h((req) => svc.eliminarProducto(req.params.id, req.params.productoId)));
-router.put('/comedores/:id/capacidad', autorizar(ADMIN), h((req) => svc.actualizarCapacidad(req.params.id, req.body)));
+const responder = (estado, datos) => ({ estado, datos });
 
-module.exports = router;
+function registrarRutasInventario(enrutador, { servicioInventario: servicio }) {
+  // Solo Administrador: vista general de todos los comedores
+  enrutador.get('/api/inventario', { roles: SOLO_ADMINISTRADOR }, () =>
+    responder(200, servicio.inventarioGeneral())
+  );
+
+  // Usuario (solo su comedor) y Administrador (todos)
+  enrutador.get('/api/comedores/:id/inventario', { roles: AMBOS_ROLES }, (ctx) =>
+    responder(200, servicio.inventarioComedor(comedorDeLaRuta(ctx)))
+  );
+  enrutador.get('/api/comedores/:id/movimientos', { roles: AMBOS_ROLES }, (ctx) =>
+    responder(200, servicio.listarMovimientos(comedorDeLaRuta(ctx)))
+  );
+  enrutador.post('/api/comedores/:id/entradas', { roles: AMBOS_ROLES, cuerpo: true }, (ctx) =>
+    responder(201, servicio.registrarEntrada(comedorDeLaRuta(ctx), ctx.cuerpo, ctx.usuario))
+  );
+  enrutador.post('/api/comedores/:id/salidas', { roles: AMBOS_ROLES, cuerpo: true }, (ctx) =>
+    responder(201, servicio.registrarSalida(comedorDeLaRuta(ctx), ctx.cuerpo, ctx.usuario))
+  );
+  enrutador.post('/api/comedores/:id/mermas', { roles: AMBOS_ROLES, cuerpo: true }, (ctx) =>
+    responder(201, servicio.registrarMerma(comedorDeLaRuta(ctx), ctx.cuerpo, ctx.usuario))
+  );
+
+  // Solo Administrador
+  enrutador.post('/api/comedores/:id/productos', { roles: SOLO_ADMINISTRADOR, cuerpo: true }, (ctx) =>
+    responder(201, servicio.crearProducto(comedorDeLaRuta(ctx), ctx.cuerpo))
+  );
+  enrutador.delete('/api/comedores/:id/productos/:productoId', { roles: SOLO_ADMINISTRADOR }, (ctx) =>
+    responder(
+      200,
+      servicio.eliminarProducto(comedorDeLaRuta(ctx), validarId(ctx.params.productoId, 'id del producto'))
+    )
+  );
+  enrutador.put('/api/comedores/:id/capacidad', { roles: SOLO_ADMINISTRADOR, cuerpo: true }, (ctx) =>
+    responder(200, servicio.configurarCapacidad(comedorDeLaRuta(ctx), ctx.cuerpo))
+  );
+}
+
+module.exports = { registrarRutasInventario, AMBOS_ROLES, SOLO_ADMINISTRADOR };

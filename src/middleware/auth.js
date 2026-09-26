@@ -1,24 +1,37 @@
-const jwt = require('jsonwebtoken');
-const config = require('../config');
-const { unauthorized, forbidden } = require('../utils/errors');
+'use strict';
 
-/** Verifica el JWT enviado en el encabezado Authorization: Bearer <token>. */
-function autenticar(req, _res, next) {
-  const header = req.headers.authorization || '';
-  const [tipo, token] = header.split(' ');
-  if (tipo !== 'Bearer' || !token) return next(unauthorized('Token no proporcionado'));
-  try {
-    req.usuario = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] });
-    return next();
-  } catch (e) {
-    return next(unauthorized(e.name === 'TokenExpiredError' ? 'Token expirado' : 'Token inválido'));
+const { verificarToken } = require('../utils/jwt');
+const { errores } = require('../utils/errores');
+
+const ROLES = ['Usuario', 'Administrador'];
+
+/**
+ * Lee el encabezado "Authorization: Bearer <token>", verifica el JWT y
+ * devuelve los datos del usuario que viajan en el token.
+ */
+function autenticar(encabezado, secreto) {
+  if (!encabezado) throw errores.noAutenticado('Token no proporcionado');
+  const [esquema, token, ...resto] = String(encabezado).split(' ');
+  if (esquema !== 'Bearer' || !token || resto.length > 0) {
+    throw errores.noAutenticado('Formato inválido: usa Authorization: Bearer <token>');
+  }
+  const datos = verificarToken(token, secreto);
+  if (!ROLES.includes(datos.rol) || !Number.isInteger(datos.sub)) {
+    throw errores.noAutenticado('Token inválido');
+  }
+  return { id: datos.sub, rol: datos.rol, comedorId: datos.comedorId ?? null };
+}
+
+/** Permite continuar solo si el rol del usuario está en la lista de la ruta. */
+function autorizar(usuario, rolesPermitidos) {
+  if (!rolesPermitidos.includes(usuario.rol)) throw errores.prohibido();
+}
+
+/** Un Usuario solo puede trabajar con su propio comedor; el Administrador, con todos. */
+function verificarAccesoComedor(usuario, comedorId) {
+  if (usuario.rol !== 'Administrador' && usuario.comedorId !== comedorId) {
+    throw errores.prohibido('Solo puedes consultar u operar el inventario de tu comedor');
   }
 }
 
-/** Permite el acceso solo a los roles indicados. */
-const autorizar = (...roles) => (req, _res, next) => {
-  if (!req.usuario || !roles.includes(req.usuario.rol)) return next(forbidden());
-  return next();
-};
-
-module.exports = { autenticar, autorizar };
+module.exports = { ROLES, autenticar, autorizar, verificarAccesoComedor };
