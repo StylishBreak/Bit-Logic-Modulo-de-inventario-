@@ -1,0 +1,97 @@
+name: CI/CD Módulo de Inventario
+
+# 1) CÓDIGO: el pipeline se activa solo con cada push o pull request a main
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # 2) PRUEBAS: instala dependencias y ejecuta las pruebas unitarias con cobertura
+  pruebas:
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm test
+        env:
+          NODE_ENV: test
+      - name: Guardar reporte de cobertura y resultados
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-y-pruebas
+          path: |
+            coverage/
+            reports/junit.xml
+      - name: Análisis de calidad con SonarQube / SonarCloud
+        if: ${{ env.SONAR_TOKEN != '' }}
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL || 'https://sonarcloud.io' }}
+
+  # 3) BUILD: verifica y empaqueta el proyecto y construye la imagen Docker
+  build:
+    needs: pruebas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: docker build -t modulo-inventario:${{ github.sha }} .
+      - name: Prueba rápida de la imagen
+        run: |
+          docker run -d -p 3000:3000 -e JWT_SECRET=ci-secret --name app modulo-inventario:${{ github.sha }}
+          sleep 5
+          curl --fail http://localhost:3000/health
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # 4) DESPLIEGUE: solo en push a main, dispara el despliegue en Render y verifica que responda
+  despliegue:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: produccion
+    steps:
+      - name: Disparar despliegue en Render
+        run: curl --fail -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+      - name: Esperar y verificar que el servicio esté arriba
+        run: |
+          for i in $(seq 1 30); do
+            if curl --silent --fail "${{ vars.APP_URL }}/health"; then echo " Despliegue verificado"; exit 0; fi
+            sleep 10
+          done
+          echo "El servicio no respondió a tiempo"; exit 1
+
+  # Seguridad: escaneo OWASP ZAP contra la versión desplegada
+  zap:
+    needs: despliegue
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: ${{ vars.APP_URL }}
+          rules_file_name: .zap/rules.tsv
+          allow_issue_writing: false
+          fail_action: false
