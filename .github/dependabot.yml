@@ -1,0 +1,8 @@
+# Mantiene al día las Actions fijadas por commit (SHA): Dependabot propone el cambio de SHA
+# y actualiza el comentario con la versión.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

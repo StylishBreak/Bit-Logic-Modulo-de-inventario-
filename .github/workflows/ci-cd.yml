@@ -25,17 +25,17 @@ jobs:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - name: Descargar el código
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0 # historial completo para SonarQube
 
       - name: Preparar Node.js 22
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
 
       - name: Instalar (el proyecto no tiene dependencias externas)
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Auditar dependencias
         run: npm audit --audit-level=high
@@ -45,7 +45,7 @@ jobs:
 
       - name: Guardar resultados de pruebas y cobertura
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: pruebas-y-cobertura
           path: |
@@ -54,7 +54,7 @@ jobs:
 
       - name: Análisis de calidad con SonarQube Cloud
         if: env.SONAR_TOKEN != ''
-        uses: SonarSource/sonarqube-scan-action@v8
+        uses: SonarSource/sonarqube-scan-action@ba9859eae8dd6bd29e412f25ddbbef3d032000f4 # v8.2.2
         with:
           args: >
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
@@ -66,13 +66,13 @@ jobs:
     needs: pruebas
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
 
-      - run: npm ci
+      - run: npm ci --ignore-scripts
 
       - name: Construir el paquete
         run: npm run build
@@ -91,7 +91,7 @@ jobs:
           test "$codigo" = "401" && echo "✔ La API rechaza peticiones sin token (401)"
 
       - name: Guardar el paquete construido
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: modulo-inventario-dist
           path: dist/
@@ -148,10 +148,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: produccion
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Escaneo base de OWASP ZAP
-        uses: zaproxy/action-baseline@v0.15.0
+        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
         with:
           target: ${{ vars.APP_URL }}
           rules_file_name: .zap/rules.tsv
