@@ -146,6 +146,7 @@ jobs:
     needs: despliegue
     if: needs.despliegue.outputs.configurado == 'true'
     runs-on: ubuntu-latest
+    environment: produccion
     steps:
       - uses: actions/checkout@v6
 
