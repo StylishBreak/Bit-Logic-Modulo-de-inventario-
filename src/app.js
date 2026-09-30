@@ -73,7 +73,7 @@ function crearApp({ db, config }) {
   const servicioAuth = crearServicioAuth({ db, config });
   const servicioInventario = crearServicioInventario({ db, config });
   const limitadorLogin = new LimitadorIntentos({
-    maximo: config.loginMaxIntentos,
+    maximo: config.loginMaxFallosIp,
     ventanaMs: config.loginVentanaMs,
   });
   const limitadorCuentas = new LimitadorIntentos({

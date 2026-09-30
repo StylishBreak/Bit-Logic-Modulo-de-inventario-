@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Limita los intentos por clave (IP o cuenta) dentro de una ventana de tiempo.
+ * Limita los intentos fallidos por clave (IP o cuenta) dentro de una ventana de tiempo.
  * Se usa en el inicio de sesión para frenar ataques de fuerza bruta.
  */
 class LimitadorIntentos {
@@ -38,6 +38,22 @@ class LimitadorIntentos {
       restantes: Math.max(0, this.maximo - registro.conteo),
       reinicioSegundos: Math.ceil((registro.reinicio - ahora) / 1000),
     };
+  }
+
+  /**
+   * Aparta un intento antes de verificar la contraseña. Si la clave ya llegó al máximo
+   * no cuenta nada. Como consultar y registrar ocurren en el mismo paso, varias peticiones
+   * simultáneas no pueden pasar del máximo mientras la verificación está en curso.
+   */
+  reservar(clave, ahora = Date.now()) {
+    const estado = this.consultar(clave, ahora);
+    return estado.permitido ? this.registrar(clave, ahora) : estado;
+  }
+
+  /** Devuelve un intento apartado que al final no fue un fallo (por ejemplo, un inicio de sesión correcto). */
+  liberar(clave, ahora = Date.now()) {
+    const registro = this.registros.get(clave);
+    if (registro && ahora < registro.reinicio && registro.conteo > 0) registro.conteo -= 1;
   }
 
   reiniciar(clave) {

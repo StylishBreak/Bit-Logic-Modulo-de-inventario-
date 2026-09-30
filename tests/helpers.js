@@ -28,7 +28,7 @@ function configuracionDePrueba(cambios = {}) {
     jwtSecreto: crypto.randomBytes(32).toString('hex'),
     secretoTemporal: false,
     jwtExpiraSegundos: 3600,
-    loginMaxIntentos: 1000,
+    loginMaxFallosIp: 1000,
     loginVentanaMs: 15 * 60 * 1000,
     loginMaxFallosCuenta: 1000,
     confiarEnProxy: false,

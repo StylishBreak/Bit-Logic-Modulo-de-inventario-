@@ -92,10 +92,22 @@
   // ---------- sesión ----------
   async function iniciarSesion(evento) {
     evento.preventDefault();
-    const { codigo, datos } = await api('POST', '/api/auth/login', {
-      correo: $('login-correo').value,
-      password: $('login-password').value,
-    });
+    // Mientras se verifica la contraseña el botón se desactiva, para no mandar intentos repetidos
+    const boton = $('boton-entrar');
+    if (boton.disabled) return;
+    boton.disabled = true;
+    boton.textContent = 'Verificando…';
+    let respuesta;
+    try {
+      respuesta = await api('POST', '/api/auth/login', {
+        correo: $('login-correo').value,
+        password: $('login-password').value,
+      });
+    } finally {
+      boton.disabled = false;
+      boton.textContent = 'Entrar';
+    }
+    const { codigo, datos } = respuesta;
     if (codigo !== 200) return;
     estado.token = datos.token;
     estado.usuario = datos.usuario;

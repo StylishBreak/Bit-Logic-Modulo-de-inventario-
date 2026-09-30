@@ -25,8 +25,8 @@ const errores = {
   conflicto: (mensaje) => new ErrorApp(409, mensaje),
   demasiadoGrande: () => new ErrorApp(413, 'El cuerpo de la petición es demasiado grande'),
   tipoNoSoportado: () => new ErrorApp(415, 'El Content-Type debe ser application/json'),
-  demasiadasSolicitudes: (segundos) =>
-    new ErrorApp(429, 'Demasiados intentos de inicio de sesión. Intenta más tarde', undefined, {
+  demasiadasSolicitudes: (segundos, motivo = 'Demasiados intentos de inicio de sesión') =>
+    new ErrorApp(429, `${motivo}. Intenta de nuevo en ${Math.max(1, Math.ceil(segundos / 60))} min`, undefined, {
       'Retry-After': String(segundos),
     }),
 };

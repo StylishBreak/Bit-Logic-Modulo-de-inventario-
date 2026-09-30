@@ -99,35 +99,69 @@ describe('Controles de seguridad', () => {
     assert.match(estilos.encabezados.get('content-type'), /text\/css/);
   });
 
-  test('CP-61 · fuerza bruta: después del límite de intentos responde 429', async () => {
-    entorno = await crearEntorno({ loginMaxIntentos: 3 });
-    const intento = () =>
-      entorno.pedir('POST', '/api/auth/login', { cuerpo: { correo: 'admin@comedores.test', password: 'Adivina#1' } });
-    for (let i = 0; i < 3; i++) assert.equal((await intento()).estado, 401);
-    const bloqueado = await intento();
+  const login = (correo, password, ip) =>
+    entorno.pedir('POST', '/api/auth/login', {
+      cuerpo: { correo, password },
+      encabezados: ip ? { 'X-Forwarded-For': ip } : {},
+    });
+
+  test('CP-61 · fuerza bruta: tras varios fallos se bloquea ese correo (429), pero los demás siguen entrando', async () => {
+    entorno = await crearEntorno({ loginMaxFallosCuenta: 3 });
+    for (let i = 0; i < 3; i++) assert.equal((await login('admin@comedores.test', 'Adivina#1')).estado, 401);
+    const bloqueado = await login('admin@comedores.test', 'Adivina#1');
     assert.equal(bloqueado.estado, 429);
     assert.ok(Number(bloqueado.encabezados.get('retry-after')) > 0);
-    // Ni siquiera la contraseña correcta entra mientras dura el bloqueo
-    const correcto = await entorno.pedir('POST', '/api/auth/login', {
-      cuerpo: { correo: USUARIOS_DEMO.admin.correo, password: USUARIOS_DEMO.admin.clave },
-    });
-    assert.equal(correcto.estado, 429);
+    assert.match(bloqueado.datos.error, /cuenta está bloqueada temporalmente.*Intenta de nuevo en 15 min/);
+    // Ni siquiera la contraseña correcta de ESA cuenta entra mientras dura el bloqueo...
+    assert.equal((await login(USUARIOS_DEMO.admin.correo, USUARIOS_DEMO.admin.clave)).estado, 429);
+    // ...pero otra cuenta desde la misma conexión sí entra
+    assert.equal((await login(USUARIOS_DEMO.usuarioA.correo, USUARIOS_DEMO.usuarioA.clave)).estado, 200);
+  });
+
+  test('CP-61 · los inicios de sesión correctos y los datos mal escritos no cuentan como intentos fallidos', async () => {
+    // Antes: 20 intentos de cualquier tipo desde una IP bloqueaban a todos los correos de esa conexión
+    entorno = await crearEntorno({ loginMaxFallosIp: 3, loginMaxFallosCuenta: 3 });
+    for (let i = 0; i < 10; i++) {
+      assert.equal((await login(USUARIOS_DEMO.admin.correo, USUARIOS_DEMO.admin.clave)).estado, 200);
+      assert.equal((await login('correo-sin-arroba', 'x')).estado, 400);
+    }
+    // Dos fallos y luego un acceso correcto: el contador de la cuenta vuelve a cero
+    assert.equal((await login(USUARIOS_DEMO.usuarioA.correo, 'Adivina#1')).estado, 401);
+    assert.equal((await login(USUARIOS_DEMO.usuarioA.correo, 'Adivina#1')).estado, 401);
+    assert.equal((await login(USUARIOS_DEMO.usuarioA.correo, USUARIOS_DEMO.usuarioA.clave)).estado, 200);
+    assert.equal((await login(USUARIOS_DEMO.usuarioA.correo, 'Adivina#1')).estado, 401);
+  });
+
+  test('CP-61 · una IP que prueba muchos correos distintos se bloquea al llegar al máximo de fallos', async () => {
+    entorno = await crearEntorno({ confiarEnProxy: true, loginMaxFallosIp: 4 });
+    for (let i = 1; i <= 4; i++) {
+      assert.equal((await login(`persona${i}@comedores.test`, 'Adivina#1', '203.0.113.50')).estado, 401);
+    }
+    const bloqueada = await login(USUARIOS_DEMO.admin.correo, USUARIOS_DEMO.admin.clave, '203.0.113.50');
+    assert.equal(bloqueada.estado, 429);
+    assert.match(bloqueada.datos.error, /desde esta conexión/);
+    // Otra conexión no se ve afectada
+    assert.equal((await login(USUARIOS_DEMO.admin.correo, USUARIOS_DEMO.admin.clave, '198.51.100.7')).estado, 200);
+  });
+
+  test('CP-61 · muchos intentos simultáneos no pasan del máximo de fallos', async () => {
+    entorno = await crearEntorno({ loginMaxFallosCuenta: 3 });
+    const respuestas = await Promise.all(
+      Array.from({ length: 10 }, () => login('admin@comedores.test', 'Adivina#1'))
+    );
+    const estados = respuestas.map((r) => r.estado).sort();
+    assert.deepEqual(estados, [401, 401, 401, 429, 429, 429, 429, 429, 429, 429]);
   });
 
   test('CP-61 · la cuenta se bloquea tras varias contraseñas incorrectas aunque cambie la IP', async () => {
     entorno = await crearEntorno({ confiarEnProxy: true, loginMaxFallosCuenta: 3 });
-    const intento = (correo, password, ip) =>
-      entorno.pedir('POST', '/api/auth/login', {
-        cuerpo: { correo, password },
-        encabezados: { 'X-Forwarded-For': ip },
-      });
     for (let i = 1; i <= 3; i++) {
-      assert.equal((await intento('admin@comedores.test', 'Adivina#1', `203.0.113.${i}`)).estado, 401);
+      assert.equal((await login('admin@comedores.test', 'Adivina#1', `203.0.113.${i}`)).estado, 401);
     }
-    const bloqueada = await intento(USUARIOS_DEMO.admin.correo, USUARIOS_DEMO.admin.clave, '198.51.100.9');
+    const bloqueada = await login(USUARIOS_DEMO.admin.correo, USUARIOS_DEMO.admin.clave, '198.51.100.9');
     assert.equal(bloqueada.estado, 429);
     // Otra cuenta no se ve afectada
-    const otra = await intento(USUARIOS_DEMO.usuarioA.correo, USUARIOS_DEMO.usuarioA.clave, '198.51.100.9');
+    const otra = await login(USUARIOS_DEMO.usuarioA.correo, USUARIOS_DEMO.usuarioA.clave, '198.51.100.9');
     assert.equal(otra.estado, 200);
   });
 

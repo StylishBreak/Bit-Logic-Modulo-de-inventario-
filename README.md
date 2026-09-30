@@ -3,7 +3,7 @@
 API REST y página web para controlar el inventario de los comedores comunitarios: productos, entradas, salidas, mermas, límite de recepción por espacio y stock máximo, y semáforo de ocupación.
 
 - **Autenticación:** JWT (HS256, 1 hora) y contraseñas guardadas como hash scrypt.
-- **Fuerza bruta:** 20 intentos de inicio de sesión cada 15 min por IP y bloqueo de la cuenta tras 10 contraseñas incorrectas.
+- **Fuerza bruta:** solo cuentan los intentos fallidos. Tras 5 fallos con un correo se bloquea **solo ese correo** durante 15 min (los demás siguen entrando) y tras 50 fallos desde una misma IP se bloquea esa IP. Los accesos correctos no cuentan y el botón de la página se desactiva mientras se verifica la contraseña. Se ajusta con `LOGIN_MAX_FALLOS_CUENTA`, `LOGIN_MAX_FALLOS_IP` y `LOGIN_VENTANA_MINUTOS`; los bloqueos se guardan en memoria, así que reiniciar el servicio los borra.
 - **Roles:** Usuario (responsable de un comedor) y Administrador.
 - **Base de datos:** SQLite (un solo archivo, `data/inventario.db`).
 - **Sin dependencias externas:** todo usa módulos incluidos en Node.js 22 (`http`, `crypto`, `node:sqlite`, `node:test`).
@@ -97,27 +97,31 @@ Revisa la sintaxis de todos los archivos JavaScript, comprueba que el SQL carga 
 Archivo: `.github/workflows/ci-cd.yml`. Se activa con cada *push* o *pull request* a `main`.
 
 1. **Código:** GitHub descarga el repositorio y prepara Node.js 22.
-2. **Pruebas:** `npm ci`, `npm audit`, `npm test` con cobertura, reportes como artefacto y análisis de SonarQube Cloud (si hay `SONAR_TOKEN`).
+2. **Pruebas:** `npm ci --ignore-scripts`, `npm audit`, `npm test` con cobertura, reportes como artefacto y análisis de SonarQube Cloud (si hay `SONAR_TOKEN`).
 3. **Build:** `npm run build`, prueba de humo del paquete (`/health`, página y 401 sin token) y artefacto `dist/`.
 4. **Despliegue:** solo en *push* a `main`; dispara el Deploy Hook de Render con el commit probado y espera a que `/health` responda con esa versión.
 5. **Seguridad:** escaneo base de OWASP ZAP sobre la URL publicada; el reporte queda como artefacto.
 
-### Configuración en GitHub (Settings → Secrets and variables → Actions)
+Todas las Actions están fijadas por su SHA completo (con la versión en un comentario) y `.github/dependabot.yml` propone sus actualizaciones cada semana. `npm ci` se ejecuta con `--ignore-scripts` para que ningún paquete pueda correr scripts de instalación.
 
-| Tipo | Nombre | Valor |
-|---|---|---|
-| Secret | `RENDER_DEPLOY_HOOK` | Deploy Hook del servicio en Render |
-| Variable | `APP_URL` | URL pública, por ejemplo `https://modulo-inventario.onrender.com` |
-| Secret | `SONAR_TOKEN` | Token de SonarQube Cloud |
-| Variable | `SONAR_ORGANIZATION` | Clave de la organización en SonarQube Cloud |
-| Variable | `SONAR_PROJECT_KEY` | Clave del proyecto en SonarQube Cloud |
+### Configuración en GitHub
+
+| Dónde | Tipo | Nombre | Valor |
+|---|---|---|---|
+| Settings → Environments → `produccion` | Secret | `RENDER_DEPLOY_HOOK` | Deploy Hook del servicio en Render |
+| Settings → Environments → `produccion` | Variable | `APP_URL` | URL pública, por ejemplo `https://modulo-inventario.onrender.com` |
+| Settings → Secrets and variables → Actions | Secret | `SONAR_TOKEN` | Token de SonarQube Cloud |
+| Settings → Secrets and variables → Actions | Variable | `SONAR_ORGANIZATION` | Clave de la organización en SonarQube Cloud |
+| Settings → Secrets and variables → Actions | Variable | `SONAR_PROJECT_KEY` | Clave del proyecto en SonarQube Cloud |
+
+Los jobs de Despliegue y Seguridad usan el entorno `produccion`, por eso ahí se guardan el Deploy Hook y la URL.
 
 ## 8. Despliegue en Render (gratis)
 
 1. Crea una cuenta en <https://render.com> entrando con GitHub.
 2. **New → Blueprint**, elige este repositorio y confirma (usa `render.yaml`: plan gratuito, `JWT_SECRET` generado automáticamente y despliegue automático apagado, porque lo controla el pipeline).
-3. En el servicio: **Settings → Deploy Hook**, copia la URL y guárdala en GitHub como el secret `RENDER_DEPLOY_HOOK`.
-4. Copia la URL pública del servicio y guárdala como la variable `APP_URL`.
+3. En el servicio: **Settings → Deploy Hook**, copia la URL y guárdala en GitHub como el secret `RENDER_DEPLOY_HOOK` del entorno `produccion`.
+4. Copia la URL pública del servicio y guárdala como la variable `APP_URL` del mismo entorno.
 5. Haz un *push* a `main` (o *Run workflow* en Actions) y revisa que las 5 etapas terminen en verde.
 
 > En el plan gratuito el disco no es permanente: al reiniciar o desplegar, la base vuelve a los datos de ejemplo. Para uso real se necesita un disco persistente o una base administrada.
@@ -129,6 +133,8 @@ Archivo: `.github/workflows/ci-cd.yml`. Se activa con cada *push* o *pull reques
 3. Genera un token en **My Account → Security** y guárdalo en GitHub como `SONAR_TOKEN`.
 4. Guarda la clave de la organización y del proyecto como las variables `SONAR_ORGANIZATION` y `SONAR_PROJECT_KEY`.
 5. Ejecuta el pipeline; el panel mostrará bugs, vulnerabilidades, code smells, deuda técnica, cobertura y duplicación.
+
+`sonar-project.properties` define qué se analiza (`src`, `public`, `scripts` y los workflows de `.github`) y excluye `docs/evidencias/`, porque ahí solo hay reportes y capturas generados por otras herramientas (por ejemplo, los HTML de ZAP). Si se deja el *Automatic Analysis* encendido, SonarQube Cloud no lee ese archivo sino `.sonarcloud.properties`, que tiene las mismas exclusiones; en ese modo no se importa la cobertura.
 
 ## 10. OWASP ZAP
 

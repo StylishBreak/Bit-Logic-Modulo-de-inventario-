@@ -118,6 +118,20 @@ describe('Limitador de intentos (middleware/limitador.js)', () => {
     assert.equal(limitador.registros.has('cuenta'), false);
   });
 
+  test('CP-61 · reservar() no pasa del máximo y liberar() devuelve el intento que no fue un fallo', () => {
+    const limitador = new LimitadorIntentos({ maximo: 2, ventanaMs: 1000 });
+    assert.equal(limitador.reservar('cuenta', 0).permitido, true);
+    assert.equal(limitador.reservar('cuenta', 1).permitido, true);
+    const lleno = limitador.reservar('cuenta', 2);
+    assert.equal(lleno.permitido, false);
+    assert.equal(limitador.registros.get('cuenta').conteo, 2); // un intento rechazado no se cuenta
+    limitador.liberar('cuenta', 3);
+    assert.equal(limitador.reservar('cuenta', 4).permitido, true);
+    limitador.liberar('otra', 5); // liberar una clave sin registro no hace nada
+    limitador.liberar('cuenta', 5000); // ni tampoco una ventana ya vencida
+    assert.equal(limitador.registros.has('otra'), false);
+  });
+
   test('obtenerIp() solo usa X-Forwarded-For cuando se confía en el proxy', () => {
     const req = { headers: { 'x-forwarded-for': '203.0.113.7, 10.0.0.1' }, socket: { remoteAddress: '10.0.0.1' } };
     assert.equal(obtenerIp(req, true), '203.0.113.7');
@@ -141,11 +155,13 @@ describe('Enrutador y configuración', () => {
     const desarrollo = cargarConfiguracion({});
     assert.equal(desarrollo.secretoTemporal, true);
     assert.equal(desarrollo.puerto, 3000);
-    const produccion = cargarConfiguracion({ NODE_ENV: 'production', JWT_SECRET: SECRETO, PORT: '8080', TRUST_PROXY: 'true', LOGIN_MAX_FALLOS_CUENTA: '5' });
+    const produccion = cargarConfiguracion({ NODE_ENV: 'production', JWT_SECRET: SECRETO, PORT: '8080', TRUST_PROXY: 'true', LOGIN_MAX_FALLOS_CUENTA: '8', LOGIN_MAX_FALLOS_IP: '30' });
     assert.equal(produccion.puerto, 8080);
     assert.equal(produccion.confiarEnProxy, true);
     assert.equal(produccion.secretoTemporal, false);
-    assert.equal(produccion.loginMaxFallosCuenta, 5);
-    assert.equal(desarrollo.loginMaxFallosCuenta, 10);
+    assert.equal(produccion.loginMaxFallosCuenta, 8);
+    assert.equal(produccion.loginMaxFallosIp, 30);
+    assert.equal(desarrollo.loginMaxFallosCuenta, 5);
+    assert.equal(desarrollo.loginMaxFallosIp, 50);
   });
 });

@@ -101,7 +101,7 @@ paths:
         '400': { $ref: '#/components/responses/DatosInvalidos' }
         '401': { $ref: '#/components/responses/NoAutenticado' }
         '403': { description: Usuario bloqueado }
-        '429': { description: Demasiados intentos }
+        '429': { description: 'Demasiados intentos fallidos: se bloquea ese correo o esa IP durante la ventana (incluye Retry-After)' }
   /api/inventario:
     get:
       tags: [Administración]

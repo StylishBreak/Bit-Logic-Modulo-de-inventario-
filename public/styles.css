@@ -97,6 +97,7 @@ input:focus, select:focus { outline: 2px solid #93c5fd; border-color: var(--prim
   cursor: pointer;
 }
 .boton:hover { background: var(--primario-hover); }
+.boton:disabled { opacity: 0.65; cursor: wait; }
 .boton.secundario { background: #fff; color: var(--primario); }
 .boton.secundario:hover { background: #eff6ff; }
 .barra .boton.secundario { background: transparent; color: #fff; border-color: #9fb3c8; }
